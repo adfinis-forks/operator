@@ -253,6 +253,11 @@ type RaftSpec struct {
 	// Specifies the path
 	Path string `json:"address,omitempty" protobuf:"bytes,1,opt,name=path"`
 
+	// volumeClaimTemplate is a claim that pods are allowed to reference.
+	// The VaultServer controller is responsible for deploying the claim
+	// and update the volumeMounts in the Vault server container in the template.
+	VolumeClaimTemplate ofst.PersistentVolumeClaim `json:"volumeClaimTemplate" protobuf:"bytes,2,opt,name=volumeClaimTemplate"`
+
 	// Specifies the node_id
 	NodeID string `json:"nodeID,omitempty" protobuf:"bytes,2,opt,name=nodeID"`
 
