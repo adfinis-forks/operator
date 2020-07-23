@@ -22,6 +22,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	api "kubevault.dev/operator/apis/kubevault/v1alpha1"
 	cs "kubevault.dev/operator/client/clientset/versioned"
@@ -64,6 +65,7 @@ type Vault interface {
 	Apply(pt *core.PodTemplateSpec) error
 	GetService() *core.Service
 	GetDeployment(pt *core.PodTemplateSpec) *apps.Deployment
+	GetStatefulSet(pt *core.PodTemplateSpec) *apps.StatefulSet
 	GetServiceAccounts() []core.ServiceAccount
 	GetRBACRolesAndRoleBindings() ([]rbac.Role, []rbac.RoleBinding)
 	GetRBACClusterRoleBinding() rbac.ClusterRoleBinding
@@ -74,6 +76,7 @@ type Vault interface {
 type vaultSrv struct {
 	vs         *api.VaultServer
 	strg       storage.Storage
+	stfStrg    storage.StatefulStorage
 	unslr      unsealer.Unsealer
 	exprtr     exporter.Exporter
 	kubeClient kubernetes.Interface
@@ -87,9 +90,14 @@ func NewVault(vs *api.VaultServer, config *rest.Config, kc kubernetes.Interface,
 	}
 
 	// it is required to have storage
+	var stfStrg storage.StatefulStorage
 	strg, err := storage.NewStorage(kc, vs)
 	if err != nil {
-		return nil, err
+		var er error
+		stfStrg, er = storage.NewStatefulStorage(kc, vs)
+		if er != nil {
+			return nil, err
+		}
 	}
 
 	// it is not required to have unsealer
@@ -105,6 +113,7 @@ func NewVault(vs *api.VaultServer, config *rest.Config, kc kubernetes.Interface,
 	return &vaultSrv{
 		vs:         vs,
 		strg:       strg,
+		stfStrg:    stfStrg,
 		unslr:      unslr,
 		exprtr:     exprtr,
 		kubeClient: kc,
@@ -191,9 +200,18 @@ func (v *vaultSrv) GetConfig() (*core.ConfigMap, error) {
 	configMapName := v.vs.ConfigMapName()
 	cfgData := util.GetListenerConfig()
 
-	storageCfg, err := v.strg.GetStorageConfig()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get storage config")
+	storageCfg := ""
+	var err error
+	if v.strg != nil {
+		storageCfg, err = v.strg.GetStorageConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get storage config")
+		}
+	} else {
+		storageCfg, err = v.stfStrg.GetStorageConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get storage config")
+		}
 	}
 
 	exporterCfg, err := v.exprtr.GetTelemetryConfig()
@@ -201,7 +219,7 @@ func (v *vaultSrv) GetConfig() (*core.ConfigMap, error) {
 		return nil, errors.Wrap(err, "failed to get exporter config")
 	}
 
-	cfgData = fmt.Sprintf("%s\n%s\n%s", cfgData, storageCfg, exporterCfg)
+	cfgData = strings.Join([]string{cfgData, storageCfg, exporterCfg}, "\n")
 
 	configM := &core.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -325,19 +343,26 @@ func (v *vaultSrv) Apply(pt *core.PodTemplateSpec) error {
 	pt.Spec.InitContainers = core_util.UpsertContainer(pt.Spec.InitContainers, initCont)
 	pt.Spec.Containers = core_util.UpsertContainer(pt.Spec.Containers, cont)
 
-	err := v.strg.Apply(pt)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	if v.unslr != nil {
-		err = v.unslr.Apply(pt)
+	if v.strg != nil {
+		err := v.strg.Apply(pt)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+	} else {
+		err := v.stfStrg.Apply(pt)
 		if err != nil {
 			return errors.WithStack(err)
 		}
 	}
 
-	err = v.exprtr.Apply(pt, v.vs)
+	if v.unslr != nil {
+		err := v.unslr.Apply(pt)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+	}
+
+	err := v.exprtr.Apply(pt, v.vs)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -380,6 +405,10 @@ func (v *vaultSrv) GetService() *core.Service {
 }
 
 func (v *vaultSrv) GetDeployment(pt *core.PodTemplateSpec) *apps.Deployment {
+	if v.strg == nil {
+		return nil
+	}
+
 	return &apps.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        v.vs.OffshootName(),
@@ -400,6 +429,14 @@ func (v *vaultSrv) GetDeployment(pt *core.PodTemplateSpec) *apps.Deployment {
 			},
 		},
 	}
+}
+
+func (v *vaultSrv) GetStatefulSet(pt *core.PodTemplateSpec) *apps.StatefulSet {
+	if v.stfStrg == nil {
+		return nil
+	}
+
+	return &apps.StatefulSet{}
 }
 
 func (v *vaultSrv) GetServiceAccounts() []core.ServiceAccount {
