@@ -47,7 +47,6 @@ import (
 )
 
 const (
-	EnvVaultAddr            = "VAULT_ADDR"
 	EnvVaultAPIAddr         = "VAULT_API_ADDR"
 	EnvVaultClusterAddr     = "VAULT_CLUSTER_ADDR"
 	VaultClientPort         = 8200
@@ -616,16 +615,12 @@ func (v *vaultSrv) GetContainer() core.Container {
 		},
 		Env: []core.EnvVar{
 			{
-				Name:  EnvVaultAddr,
-				Value: util.VaultAddrURL("https", VaultClientPort),
-			},
-			{
 				Name:  EnvVaultAPIAddr,
-				Value: util.VaultServiceURL("https", v.vs.Name, v.vs.Namespace, VaultClientPort),
+				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClientPort),
 			},
 			{
 				Name:  EnvVaultClusterAddr,
-				Value: util.VaultServiceURL("https", v.vs.Name, v.vs.Namespace, VaultClusterPort),
+				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
 			},
 		},
 		SecurityContext: &core.SecurityContext{
