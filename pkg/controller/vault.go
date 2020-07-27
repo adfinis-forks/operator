@@ -166,6 +166,7 @@ func (v *vaultSrv) GetServerTLS() (*core.Secret, []byte, error) {
 			"localhost",
 			fmt.Sprintf("*.%s.pod", v.vs.Namespace),
 			fmt.Sprintf("%s.%s.svc", v.vs.Name, v.vs.Namespace),
+			fmt.Sprintf("*.%s-internal", v.vs.Name),
 		},
 		IPs: []net.IP{
 			net.ParseIP("127.0.0.1"),
@@ -424,12 +425,12 @@ func (v *vaultSrv) GetHeadlessService() *core.Service {
 			Selector: v.vs.OffshootSelectors(),
 			Ports: []core.ServicePort{
 				{
-					Name:     "http",
+					Name:     "client-internal",
 					Protocol: core.ProtocolTCP,
 					Port:     VaultClientPort,
 				},
 				{
-					Name:     "https-internal",
+					Name:     "cluster-internal",
 					Protocol: core.ProtocolTCP,
 					Port:     VaultClusterPort,
 				},
@@ -621,6 +622,33 @@ func (v *vaultSrv) GetContainer() core.Container {
 			{
 				Name:  EnvVaultClusterAddr,
 				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
+			},
+			{
+				Name: "HOSTNAME",
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{
+						APIVersion: "v1",
+						FieldPath:  "metadata.name",
+					},
+				},
+			},
+			{
+				Name: "HOST_IP",
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{
+						APIVersion: "v1",
+						FieldPath:  "status.hostIP",
+					},
+				},
+			},
+			{
+				Name: "POD_IP",
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{
+						APIVersion: "v1",
+						FieldPath:  "status.podIP",
+					},
+				},
 			},
 		},
 		SecurityContext: &core.SecurityContext{
