@@ -47,7 +47,8 @@ import (
 )
 
 const (
-	EnvVaultAddr            = "VAULT_API_ADDR"
+	EnvVaultAddr            = "VAULT_ADDR"
+	EnvVaultAPIAddr         = "VAULT_API_ADDR"
 	EnvVaultClusterAddr     = "VAULT_CLUSTER_ADDR"
 	VaultClientPort         = 8200
 	VaultClusterPort        = 8201
@@ -424,12 +425,12 @@ func (v *vaultSrv) GetHeadlessService() *core.Service {
 			Selector: v.vs.OffshootSelectors(),
 			Ports: []core.ServicePort{
 				{
-					Name:     "client-internal",
+					Name:     "vault-internal",
 					Protocol: core.ProtocolTCP,
 					Port:     VaultClientPort,
 				},
 				{
-					Name:     "vault-internal",
+					Name:     "cluster-internal",
 					Protocol: core.ProtocolTCP,
 					Port:     VaultClusterPort,
 				},
@@ -616,11 +617,15 @@ func (v *vaultSrv) GetContainer() core.Container {
 		Env: []core.EnvVar{
 			{
 				Name:  EnvVaultAddr,
-				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClientPort),
+				Value: util.VaultAddrURL("https", VaultClientPort),
+			},
+			{
+				Name:  EnvVaultAPIAddr,
+				Value: util.VaultServiceURL("https", v.vs.Name, v.vs.Namespace, VaultClientPort),
 			},
 			{
 				Name:  EnvVaultClusterAddr,
-				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
+				Value: util.VaultServiceURL("https", v.vs.Name, v.vs.Namespace, VaultClusterPort),
 			},
 		},
 		SecurityContext: &core.SecurityContext{
