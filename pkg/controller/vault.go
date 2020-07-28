@@ -51,6 +51,7 @@ const (
 	EnvVaultClusterAddr     = "VAULT_CLUSTER_ADDR"
 	VaultClientPort         = 8200
 	VaultClusterPort        = 8201
+	TLSCaCertKey            = "ca.crt"
 	vaultTLSAssetVolumeName = "vault-tls-secret"
 )
 
@@ -187,6 +188,7 @@ func (v *vaultSrv) GetServerTLS() (*core.Secret, []byte, error) {
 		Data: map[string][]byte{
 			core.TLSCertKey:       srvCrt,
 			core.TLSPrivateKeyKey: srvKey,
+			TLSCaCertKey:          store.CACertBytes(),
 		},
 	}
 	v.vs.Spec.TLS.CABundle = store.CACertBytes()
