@@ -53,6 +53,7 @@ const (
 	VaultClientPort         = 8200
 	VaultClusterPort        = 8201
 	vaultTLSAssetVolumeName = "vault-tls-secret"
+	TLSCACertKey            = "cacert.crt"
 )
 
 var (
@@ -188,6 +189,7 @@ func (v *vaultSrv) GetServerTLS() (*core.Secret, []byte, error) {
 		Data: map[string][]byte{
 			core.TLSCertKey:       srvCrt,
 			core.TLSPrivateKeyKey: srvKey,
+			TLSCACertKey:          store.CACertBytes(),
 		},
 	}
 	v.vs.Spec.TLS.CABundle = store.CACertBytes()
@@ -622,7 +624,7 @@ func (v *vaultSrv) GetContainer() core.Container {
 			},
 			{
 				Name:  EnvVaultCACert,
-				Value: string(v.vs.Spec.TLS.CABundle),
+				Value: fmt.Sprintf("%s%s", util.VaultTLSAssetDir, TLSCACertKey),
 			},
 			{
 				Name: "HOSTNAME",
