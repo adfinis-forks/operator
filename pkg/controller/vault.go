@@ -49,9 +49,9 @@ import (
 const (
 	EnvVaultAPIAddr         = "VAULT_API_ADDR"
 	EnvVaultClusterAddr     = "VAULT_CLUSTER_ADDR"
+	EnvVaultCACert          = "VAULT_CACERT"
 	VaultClientPort         = 8200
 	VaultClusterPort        = 8201
-	TLSCaCertKey            = "ca.crt"
 	vaultTLSAssetVolumeName = "vault-tls-secret"
 )
 
@@ -188,7 +188,6 @@ func (v *vaultSrv) GetServerTLS() (*core.Secret, []byte, error) {
 		Data: map[string][]byte{
 			core.TLSCertKey:       srvCrt,
 			core.TLSPrivateKeyKey: srvKey,
-			TLSCaCertKey:          store.CACertBytes(),
 		},
 	}
 	v.vs.Spec.TLS.CABundle = store.CACertBytes()
@@ -620,6 +619,10 @@ func (v *vaultSrv) GetContainer() core.Container {
 			{
 				Name:  EnvVaultClusterAddr,
 				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
+			},
+			{
+				Name:  EnvVaultCACert,
+				Value: string(v.vs.Spec.TLS.CABundle),
 			},
 			{
 				Name: "HOSTNAME",
