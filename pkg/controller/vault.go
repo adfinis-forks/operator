@@ -608,18 +608,6 @@ func (v *vaultSrv) GetContainer() core.Container {
 		},
 		Env: []core.EnvVar{
 			{
-				Name:  EnvVaultAPIAddr,
-				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClientPort),
-			},
-			{
-				Name:  EnvVaultClusterAddr,
-				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
-			},
-			{
-				Name:  EnvVaultCACert,
-				Value: fmt.Sprintf("%s%s", util.VaultTLSAssetDir, TLSCACertKey),
-			},
-			{
 				Name: "HOSTNAME",
 				ValueFrom: &core.EnvVarSource{
 					FieldRef: &core.ObjectFieldSelector{
@@ -645,6 +633,18 @@ func (v *vaultSrv) GetContainer() core.Container {
 						FieldPath:  "status.podIP",
 					},
 				},
+			},
+			{
+				Name:  EnvVaultAPIAddr,
+				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClientPort),
+			},
+			{
+				Name:  EnvVaultClusterAddr,
+				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
+			},
+			{
+				Name:  EnvVaultCACert,
+				Value: fmt.Sprintf("%s%s", util.VaultTLSAssetDir, TLSCACertKey),
 			},
 		},
 		SecurityContext: &core.SecurityContext{
