@@ -671,7 +671,7 @@ func (v *vaultSrv) GetContainer() core.Container {
 		ReadinessProbe: &core.Probe{
 			Handler: core.Handler{
 				HTTPGet: &core.HTTPGetAction{
-					Path:   "/v1/sys/health",
+					Path:   "/v1/sys/health?standbyok=true&perfstandbyok=true",
 					Port:   intstr.FromInt(VaultClientPort),
 					Scheme: core.URISchemeHTTPS,
 				},
