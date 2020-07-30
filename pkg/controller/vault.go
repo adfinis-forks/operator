@@ -484,7 +484,8 @@ func (v *vaultSrv) GetPodTemplate(c core.Container, saName string) *core.PodTemp
 	if v.vs.Spec.PodTemplate.Spec.SecurityContext == nil {
 		v.vs.Spec.PodTemplate.Spec.SecurityContext = &core.PodSecurityContext{}
 	}
-	v.vs.Spec.PodTemplate.Spec.SecurityContext.FSGroup = &defaultFsGroup
+	//Disabled because FsGroup must be automatically set by OpenShift
+	//v.vs.Spec.PodTemplate.Spec.SecurityContext.FSGroup = &defaultFsGroup
 
 	return &core.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
@@ -529,13 +530,14 @@ func (v *vaultSrv) GetContainer() core.Container {
 				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
 			},
 		},
-		SecurityContext: &core.SecurityContext{
-			Capabilities: &core.Capabilities{
-				// Vault requires mlock syscall to work.
-				// Without this it would fail "Error initializing core: Failed to lock memory: cannot allocate memory"
-				Add: []core.Capability{"IPC_LOCK"},
-			},
-		},
+		//Disabled because IPC_LOCK on OpenShift not working
+		//SecurityContext: &core.SecurityContext{
+		//	Capabilities: &core.Capabilities{
+		//		// Vault requires mlock syscall to work.
+		//		// Without this it would fail "Error initializing core: Failed to lock memory: cannot allocate memory"
+		//		Add: []core.Capability{"IPC_LOCK"},
+		//	},
+		//},
 		Ports: []core.ContainerPort{{
 			Name:          "vault-port",
 			ContainerPort: int32(VaultClientPort),
