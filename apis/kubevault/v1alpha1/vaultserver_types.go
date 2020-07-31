@@ -748,7 +748,7 @@ type RaftSpec struct {
 	// Path specifies the filesystem path where the vault data gets stored.
 	//
 	// This value can be overriden by setting the VAULT_RAFT_PATH environment variable.
-	Path string `json:"path" protobuf="bytes,1,opt,name=path"`
+	Path string `json:"path" protobuf:"bytes,1,opt,name=path"`
 }
 
 // AzureKeyVault contain the fields that required to unseal vault using azure key vault
