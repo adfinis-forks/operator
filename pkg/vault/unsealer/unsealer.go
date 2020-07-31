@@ -112,9 +112,8 @@ func (u *unsealerSrv) Apply(pt *core.PodTemplateSpec) error {
 
 	unslr := u.vs.Spec.Unsealer
 	cont := core.Container{
-		Name:            util.VaultUnsealerContainerName,
-		Image:           u.image,
-		ImagePullPolicy: "Always",
+		Name:  util.VaultUnsealerContainerName,
+		Image: u.image,
 	}
 	args = append(args,
 		"run",
