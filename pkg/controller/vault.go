@@ -22,6 +22,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	api "kubevault.dev/operator/apis/kubevault/v1alpha1"
 	cs "kubevault.dev/operator/client/clientset/versioned"
@@ -46,11 +47,13 @@ import (
 )
 
 const (
-	EnvVaultAddr            = "VAULT_API_ADDR"
+	EnvVaultAPIAddr         = "VAULT_API_ADDR"
 	EnvVaultClusterAddr     = "VAULT_CLUSTER_ADDR"
+	EnvVaultCACert          = "VAULT_CACERT"
 	VaultClientPort         = 8200
 	VaultClusterPort        = 8201
 	vaultTLSAssetVolumeName = "vault-tls-secret"
+	TLSCACertKey            = "cacert.crt"
 )
 
 var (
@@ -63,7 +66,9 @@ type Vault interface {
 	GetConfig() (*core.ConfigMap, error)
 	Apply(pt *core.PodTemplateSpec) error
 	GetService() *core.Service
+	GetHeadlessService(name string) *core.Service
 	GetDeployment(pt *core.PodTemplateSpec) *apps.Deployment
+	GetStatefulSet(serviceName string, pt *core.PodTemplateSpec, vcts []core.PersistentVolumeClaim) *apps.StatefulSet
 	GetServiceAccounts() []core.ServiceAccount
 	GetRBACRolesAndRoleBindings() ([]rbac.Role, []rbac.RoleBinding)
 	GetRBACClusterRoleBinding() rbac.ClusterRoleBinding
@@ -74,6 +79,7 @@ type Vault interface {
 type vaultSrv struct {
 	vs         *api.VaultServer
 	strg       storage.Storage
+	stfStrg    storage.StatefulStorage
 	unslr      unsealer.Unsealer
 	exprtr     exporter.Exporter
 	kubeClient kubernetes.Interface
@@ -87,9 +93,14 @@ func NewVault(vs *api.VaultServer, config *rest.Config, kc kubernetes.Interface,
 	}
 
 	// it is required to have storage
+	var stfStrg storage.StatefulStorage
 	strg, err := storage.NewStorage(kc, vs)
 	if err != nil {
-		return nil, err
+		var er error
+		stfStrg, er = storage.NewStatefulStorage(kc, vs)
+		if er != nil {
+			return nil, err
+		}
 	}
 
 	// it is not required to have unsealer
@@ -105,6 +116,7 @@ func NewVault(vs *api.VaultServer, config *rest.Config, kc kubernetes.Interface,
 	return &vaultSrv{
 		vs:         vs,
 		strg:       strg,
+		stfStrg:    stfStrg,
 		unslr:      unslr,
 		exprtr:     exprtr,
 		kubeClient: kc,
@@ -162,7 +174,16 @@ func (v *vaultSrv) GetServerTLS() (*core.Secret, []byte, error) {
 		},
 	}
 
-	srvCrt, srvKey, err := store.NewServerCertPairBytes(altNames)
+	// XXX when required only
+	altNames.DNSNames = append(
+		altNames.DNSNames,
+		"*.vault-internal",
+		fmt.Sprintf("%s.vault-internal.%s.svc", v.vs.Name, v.vs.Namespace),
+	)
+
+	// XXX allow both kind of certificates to be made depending on the usage.
+	//srvCrt, srvKey, err := store.NewServerCertPairBytes(altNames)
+	srvCrt, srvKey, err := store.NewPeerCertPairBytes(altNames)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "vault server create crt/key pair error")
 	}
@@ -176,6 +197,7 @@ func (v *vaultSrv) GetServerTLS() (*core.Secret, []byte, error) {
 		Data: map[string][]byte{
 			core.TLSCertKey:       srvCrt,
 			core.TLSPrivateKeyKey: srvKey,
+			TLSCACertKey:          store.CACertBytes(),
 		},
 	}
 	v.vs.Spec.TLS.CABundle = store.CACertBytes()
@@ -191,9 +213,18 @@ func (v *vaultSrv) GetConfig() (*core.ConfigMap, error) {
 	configMapName := v.vs.ConfigMapName()
 	cfgData := util.GetListenerConfig()
 
-	storageCfg, err := v.strg.GetStorageConfig()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get storage config")
+	storageCfg := ""
+	var err error
+	if v.strg != nil {
+		storageCfg, err = v.strg.GetStorageConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get storage config")
+		}
+	} else {
+		storageCfg, err = v.stfStrg.GetStorageConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get storage config")
+		}
 	}
 
 	exporterCfg, err := v.exprtr.GetTelemetryConfig()
@@ -201,7 +232,7 @@ func (v *vaultSrv) GetConfig() (*core.ConfigMap, error) {
 		return nil, errors.Wrap(err, "failed to get exporter config")
 	}
 
-	cfgData = fmt.Sprintf("%s\n%s\n%s", cfgData, storageCfg, exporterCfg)
+	cfgData = strings.Join([]string{cfgData, storageCfg, exporterCfg}, "\n")
 
 	configM := &core.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -325,19 +356,26 @@ func (v *vaultSrv) Apply(pt *core.PodTemplateSpec) error {
 	pt.Spec.InitContainers = core_util.UpsertContainer(pt.Spec.InitContainers, initCont)
 	pt.Spec.Containers = core_util.UpsertContainer(pt.Spec.Containers, cont)
 
-	err := v.strg.Apply(pt)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	if v.unslr != nil {
-		err = v.unslr.Apply(pt)
+	if v.strg != nil {
+		err := v.strg.Apply(pt)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+	} else {
+		err := v.stfStrg.Apply(pt)
 		if err != nil {
 			return errors.WithStack(err)
 		}
 	}
 
-	err = v.exprtr.Apply(pt, v.vs)
+	if v.unslr != nil {
+		err := v.unslr.Apply(pt)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+	}
+
+	err := v.exprtr.Apply(pt, v.vs)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -379,7 +417,39 @@ func (v *vaultSrv) GetService() *core.Service {
 	}
 }
 
+func (v *vaultSrv) GetHeadlessService(name string) *core.Service {
+	return &core.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   v.vs.Namespace,
+			Labels:      v.vs.OffshootLabels(),
+			Annotations: v.vs.Spec.ServiceTemplate.Annotations,
+		},
+		Spec: core.ServiceSpec{
+			Selector: v.vs.OffshootSelectors(),
+			Ports: []core.ServicePort{
+				{
+					Name:     "client-internal",
+					Protocol: core.ProtocolTCP,
+					Port:     VaultClientPort,
+				},
+				{
+					Name:     "cluster-internal",
+					Protocol: core.ProtocolTCP,
+					Port:     VaultClusterPort,
+				},
+			},
+			ClusterIP:                "None",
+			PublishNotReadyAddresses: true,
+		},
+	}
+}
+
 func (v *vaultSrv) GetDeployment(pt *core.PodTemplateSpec) *apps.Deployment {
+	if v.strg == nil {
+		return nil
+	}
+
 	return &apps.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        v.vs.OffshootName(),
@@ -398,6 +468,31 @@ func (v *vaultSrv) GetDeployment(pt *core.PodTemplateSpec) *apps.Deployment {
 					MaxSurge:       func(a intstr.IntOrString) *intstr.IntOrString { return &a }(intstr.FromInt(1)),
 				},
 			},
+		},
+	}
+}
+
+func (v *vaultSrv) GetStatefulSet(serviceName string, pt *core.PodTemplateSpec, vcts []core.PersistentVolumeClaim) *apps.StatefulSet {
+	if v.stfStrg == nil {
+		return nil
+	}
+
+	return &apps.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        v.vs.OffshootName(),
+			Namespace:   v.vs.Namespace,
+			Labels:      v.vs.OffshootLabels(),
+			Annotations: v.vs.Spec.PodTemplate.Controller.Annotations,
+		},
+		Spec: apps.StatefulSetSpec{
+			Replicas:    v.vs.Spec.Replicas,
+			Selector:    &metav1.LabelSelector{MatchLabels: v.vs.OffshootSelectors()},
+			ServiceName: serviceName,
+			Template:    *pt,
+			UpdateStrategy: apps.StatefulSetUpdateStrategy{
+				Type: apps.RollingUpdateStatefulSetStrategyType,
+			},
+			VolumeClaimTemplates: vcts,
 		},
 	}
 }
@@ -460,9 +555,8 @@ func (v *vaultSrv) GetRBACRolesAndRoleBindings() ([]rbac.Role, []rbac.RoleBindin
 func (v *vaultSrv) GetRBACClusterRoleBinding() rbac.ClusterRoleBinding {
 	return rbac.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      v.vs.Name + "-k8s-token-reviewer",
-			Namespace: v.vs.Namespace,
-			Labels:    v.vs.OffshootLabels(),
+			Name:   v.vs.Namespace + "-" + v.vs.Name + "-k8s-token-reviewer",
+			Labels: v.vs.OffshootLabels(),
 		},
 		RoleRef: rbac.RoleRef{
 			APIGroup: rbac.GroupName,
@@ -521,12 +615,43 @@ func (v *vaultSrv) GetContainer() core.Container {
 		},
 		Env: []core.EnvVar{
 			{
-				Name:  EnvVaultAddr,
+				Name: "HOSTNAME",
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{
+						APIVersion: "v1",
+						FieldPath:  "metadata.name",
+					},
+				},
+			},
+			{
+				Name: "HOST_IP",
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{
+						APIVersion: "v1",
+						FieldPath:  "status.hostIP",
+					},
+				},
+			},
+			{
+				Name: "POD_IP",
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{
+						APIVersion: "v1",
+						FieldPath:  "status.podIP",
+					},
+				},
+			},
+			{
+				Name:  EnvVaultAPIAddr,
 				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClientPort),
 			},
 			{
 				Name:  EnvVaultClusterAddr,
 				Value: util.VaultServiceURL(v.vs.Name, v.vs.Namespace, VaultClusterPort),
+			},
+			{
+				Name:  EnvVaultCACert,
+				Value: fmt.Sprintf("%s%s", util.VaultTLSAssetDir, TLSCACertKey),
 			},
 		},
 		SecurityContext: &core.SecurityContext{
@@ -546,7 +671,7 @@ func (v *vaultSrv) GetContainer() core.Container {
 		ReadinessProbe: &core.Probe{
 			Handler: core.Handler{
 				HTTPGet: &core.HTTPGetAction{
-					Path:   "/v1/sys/health",
+					Path:   "/v1/sys/health?standbyok=true&perfstandbyok=true",
 					Port:   intstr.FromInt(VaultClientPort),
 					Scheme: core.URISchemeHTTPS,
 				},
