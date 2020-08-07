@@ -32,7 +32,7 @@ REGISTRY ?= kubevault
 git_branch       := $(shell git rev-parse --abbrev-ref HEAD)
 git_tag          := $(shell git describe --exact-match --abbrev=0 2>/dev/null || echo "")
 commit_hash      := $(shell git rev-parse --verify HEAD)
-commit_timestamp := $(shell date --date="@$$(git show -s --format=%ct)" --utc +%FT%T)
+commit_timestamp := 1590473912#$(shell date --date="@$$(git show -s --format=%ct)" --utc +%FT%T)
 
 VERSION          := $(shell git describe --tags --always --dirty)
 version_strategy := commit_hash

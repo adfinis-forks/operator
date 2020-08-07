@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"time"
+	"strings"
 
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
@@ -41,11 +42,13 @@ func GetJwtTokenSecretFromServiceAccount(kc kubernetes.Interface, name, namespac
 	} else {
 		// get secret
 		for _, s := range sa.Secrets {
-			sr, err := kc.CoreV1().Secrets(namespace).Get(context.TODO(), s.Name, metav1.GetOptions{})
-			if err == nil {
-				return sr, nil
-			} else if !kerr.IsNotFound(err) {
-				return nil, err
+			if strings.Contains(s.Name, "token") {
+				sr, err := kc.CoreV1().Secrets(namespace).Get(context.TODO(), s.Name, metav1.GetOptions{})
+				if err == nil {
+					return sr, nil
+				} else if !kerr.IsNotFound(err) {
+					return nil, err
+				}
 			}
 		}
 		return nil, errors.New("token secret is not available")

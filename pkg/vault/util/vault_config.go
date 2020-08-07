@@ -39,7 +39,11 @@ const (
 	VaultTLSAssetDir = "/etc/vault/tls/"
 )
 
+//To run on Openshift mlock must be disabled
 var listenerFmt = `
+disable_mlock = true
+ui = true
+
 listener "tcp" {
   address = "0.0.0.0:8200"
   cluster_address = "0.0.0.0:8201"
